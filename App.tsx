@@ -5,6 +5,7 @@ import FinancialDashboard from "./components/FinancialDashboard";
 import { PromptDef, StructuredAnalysisData, AnalysisCategory } from "./types";
 import { PROMPTS } from "./constants";
 import { analyzeStock } from "./services/geminiService";
+import { Analytics } from "@vercel/analytics/react";
 
 const App: React.FC = () => {
   const [selectedPrompt, setSelectedPrompt] = useState<PromptDef | null>(null);
