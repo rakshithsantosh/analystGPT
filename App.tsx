@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import Sidebar from './components/Sidebar';
 import MarkdownRenderer from './components/MarkdownRenderer';
 import FinancialDashboard from './components/FinancialDashboard';
@@ -304,6 +305,7 @@ const App: React.FC = () => {
             )}
         </div>
       </div>
+      <Analytics />
     </div>
   );
 };
