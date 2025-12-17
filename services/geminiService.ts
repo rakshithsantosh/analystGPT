@@ -1,19 +1,24 @@
 import { GoogleGenAI } from "@google/genai";
 import { PROMPTS } from "../constants";
-import { AnalysisResult, StructuredAnalysisData, AnalysisCategory } from "../types";
+import {
+  AnalysisResult,
+  StructuredAnalysisData,
+  AnalysisCategory,
+} from "../types";
 
 export const analyzeStock = async (
   apiKey: string,
   promptId: string,
-  stockName: string
+  stockName: string,
+  context?: "India" | "Global"
 ): Promise<AnalysisResult> => {
   if (!apiKey) throw new Error("API Key is missing.");
 
-  const promptDef = PROMPTS.find(p => p.id === promptId);
+  const promptDef = PROMPTS.find((p) => p.id === promptId);
   if (!promptDef) throw new Error("Invalid Prompt ID");
 
   const ai = new GoogleGenAI({ apiKey });
-  
+
   // JSON Extraction Instruction
   let jsonInstruction = "";
 
@@ -67,82 +72,105 @@ export const analyzeStock = async (
   }
 
   // Replace placeholder in user prompt
-  const userPrompt = promptDef.userPromptTemplate.replace(/{{STOCK}}/g, stockName) + jsonInstruction;
+  let userPrompt = promptDef.userPromptTemplate.replace(
+    /{{STOCK}}/g,
+    stockName
+  );
 
-  // Use Gemini 2.5 Flash for speed and search capabilities
-  const modelId = "gemini-2.5-flash";
+  // Apply context logic for Sector Analysis
+  if (promptDef.category === AnalysisCategory.SECTOR && context) {
+    userPrompt += `\n\nCRITICAL INSTRUCTION: Analyze this strictly in the context of the ${context} market. Focus on ${context} specific companies, regulations, and market sizing. Ignore global data unless comparing or relevant to ${context}.`;
+  }
+
+  userPrompt += jsonInstruction;
+
+  // Use Gemini 3 Pro for advanced reasoning
+  const modelId = "gemini-3-pro-preview";
 
   try {
     const response = await ai.models.generateContent({
       model: modelId,
       contents: {
         role: "user",
-        parts: [{ text: userPrompt }]
+        parts: [{ text: userPrompt }],
       },
       config: {
         systemInstruction: promptDef.systemPrompt,
         // Enable Google Search Grounding
         tools: [{ googleSearch: {} }],
-        generationConfig: {
-            temperature: 0.4,
-            maxOutputTokens: 8192,
-        }
-      }
+        temperature: 0.4,
+        maxOutputTokens: 8192,
+      },
     });
 
     let fullText = response.text || "No response generated.";
-    
+
     // Extract JSON block
     let structuredData: StructuredAnalysisData | undefined;
     // Regex matches ```json ... ``` OR just ``` ... ``` to be more forgiving
     const jsonMatch = fullText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-    
-    if (jsonMatch && jsonMatch[1]) {
-        try {
-            structuredData = JSON.parse(jsonMatch[1]);
-            
-            // Sanitize numerical data to ensure charts don't break
-            if (structuredData) {
-                if (structuredData.price_history) {
-                    structuredData.price_history = structuredData.price_history.map((item: any) => ({
-                        ...item,
-                        price: typeof item.price === 'string' ? parseFloat(item.price.replace(/,/g, '')) : item.price
-                    })).filter((item: any) => !isNaN(item.price));
-                }
-                
-                if (structuredData.annual_financials) {
-                    structuredData.annual_financials = structuredData.annual_financials.map((item: any) => ({
-                        ...item,
-                        revenue: typeof item.revenue === 'string' ? parseFloat(item.revenue.replace(/,/g, '')) : item.revenue,
-                        profit: typeof item.profit === 'string' ? parseFloat(item.profit.replace(/,/g, '')) : item.profit
-                    })).filter((item: any) => !isNaN(item.revenue) || !isNaN(item.profit));
-                }
-            }
 
-            // Remove the JSON block from the display text to keep it clean
-            fullText = fullText.replace(/```(?:json)?\s*[\s\S]*?\s*```/, '').trim();
-        } catch (e) {
-            console.error("Failed to parse extracted JSON", e);
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        structuredData = JSON.parse(jsonMatch[1]);
+
+        // Sanitize numerical data to ensure charts don't break
+        if (structuredData) {
+          if (structuredData.price_history) {
+            structuredData.price_history = structuredData.price_history
+              .map((item: any) => ({
+                ...item,
+                price:
+                  typeof item.price === "string"
+                    ? parseFloat(item.price.replace(/,/g, ""))
+                    : item.price,
+              }))
+              .filter((item: any) => !isNaN(item.price));
+          }
+
+          if (structuredData.annual_financials) {
+            structuredData.annual_financials = structuredData.annual_financials
+              .map((item: any) => ({
+                ...item,
+                revenue:
+                  typeof item.revenue === "string"
+                    ? parseFloat(item.revenue.replace(/,/g, ""))
+                    : item.revenue,
+                profit:
+                  typeof item.profit === "string"
+                    ? parseFloat(item.profit.replace(/,/g, ""))
+                    : item.profit,
+              }))
+              .filter(
+                (item: any) => !isNaN(item.revenue) || !isNaN(item.profit)
+              );
+          }
         }
+
+        // Remove the JSON block from the display text to keep it clean
+        fullText = fullText.replace(/```(?:json)?\s*[\s\S]*?\s*```/, "").trim();
+      } catch (e) {
+        console.error("Failed to parse extracted JSON", e);
+      }
     }
 
     // Extract grounding sources if available and append to text
-    const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
+    const chunks =
+      response.candidates?.[0]?.groundingMetadata?.groundingChunks || [];
     const sources = chunks
       .map((c: any) => c.web)
       .filter((w: any) => w)
-      .map((w: any) => `- [${w?.title || 'Source'}](${w?.uri})`)
+      .map((w: any) => `- [${w?.title || "Source"}](${w?.uri})`)
       .filter((v, i, a) => a.indexOf(v) === i); // Deduplicate
 
     if (sources.length > 0) {
-        fullText += "\n\n---\n### Sources\n" + sources.join('\n');
+      fullText += "\n\n---\n### Sources\n" + sources.join("\n");
     }
 
     return {
-        markdown: fullText,
-        structuredData
+      markdown: fullText,
+      structuredData,
     };
-
   } catch (error: any) {
     console.error("Gemini API Error:", error);
     throw new Error(error.message || "Failed to analyze data.");
