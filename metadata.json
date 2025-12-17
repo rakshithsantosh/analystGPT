@@ -1,0 +1,5 @@
+{
+  "name": "AnalystGPT",
+  "description": "Professional stock analysis workspace using specialized financial prompts and Gemini 2.5.",
+  "requestFramePermissions": []
+}
